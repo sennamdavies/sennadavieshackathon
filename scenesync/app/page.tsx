@@ -1,204 +1,300 @@
 "use client";
 
-import { json2csv } from "json-2-csv";
+import { Clapperboard, FileText, LoaderCircle, Sparkles } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 
-type SceneBreakdown = {
-  sceneTitle: string;
-  cast?: string[];
-  props?: string[];
-  wardrobe?: string[];
-  vfx?: string[];
+import { analyzeSceneAction } from "@/app/actions";
+import { BreakdownTable } from "@/components/breakdown-table";
+import { FileUploadZone } from "@/components/file-upload-zone";
+import { ProgressBar } from "@/components/progress-bar";
+import { downloadBreakdownCsv } from "@/lib/export-csv";
+import { parseScript } from "@/lib/parse-script";
+import type { BreakdownProgress, SceneBreakdown } from "@/lib/types";
+
+const IDLE_PROGRESS: BreakdownProgress = {
+  status: "idle",
+  completedScenes: 0,
+  totalScenes: 0,
+  percent: 0,
+  message: "Upload a screenplay to begin the smart breakdown.",
 };
 
-const sampleScenes: SceneBreakdown[] = [
-  {
-    sceneTitle: "Scene 1 - Coffee Shop Reveal",
-    cast: ["MAYA", "JORDAN"],
-    props: ["Laptop", "Storyboard", "Coffee Cups"],
-    wardrobe: ["Red Jacket", "Denim Shirt"],
-    vfx: ["Window rain enhancement"],
-  },
-  {
-    sceneTitle: "Scene 2 - Alley Chase",
-    cast: ["MAYA", "STUNT DOUBLE"],
-    props: ["Flashlight", "Backpack"],
-    wardrobe: ["Running Shoes"],
-    vfx: ["Muzzle flash", "Neon sign cleanup"],
-  },
-  {
-    sceneTitle: "Scene 3 - Dream Sequence",
-    cast: ["MAYA"],
-    props: ["Pendant"],
-    wardrobe: ["Silk Robe"],
-    vfx: ["Particle shimmer", "Sky replacement"],
-  },
-];
+/**
+ * Builds the shared progress state for the scene-by-scene analysis loop.
+ *
+ * Args:
+ *   completedScenes: Number of scenes already analyzed.
+ *   totalScenes: Total scenes queued for analysis.
+ *   currentSceneTitle: Optional title of the scene currently being processed.
+ *   status: UI status value for the progress card.
+ *   message: Human-readable progress message.
+ *
+ * Returns:
+ *   A normalized progress object for the UI.
+ */
+function createProgressState(
+  completedScenes: number,
+  totalScenes: number,
+  currentSceneTitle: string | undefined,
+  status: BreakdownProgress["status"],
+  message: string
+): BreakdownProgress {
+  const percent =
+    totalScenes === 0 ? 0 : Math.round((completedScenes / totalScenes) * 100);
 
-function sanitizeSpreadsheetValue(value: string) {
-  if (/^[=+\-@\t\r]/.test(value)) {
-    return `'${value}`;
-  }
-
-  return value;
-}
-
-function joinValues(values: string[], prefix = "") {
-  return sanitizeSpreadsheetValue(
-    values.map((value) => `${prefix}${value}`).join(", ")
-  );
-}
-
-function buildExportRows(data: SceneBreakdown[]) {
-  return data.map((scene) => ({
-    Scene: sanitizeSpreadsheetValue(scene.sceneTitle),
-    Characters: joinValues(scene.cast ?? []),
-    Props: joinValues(scene.props ?? []),
-    "Wardrobe/VFX": joinValues(scene.wardrobe ?? [], "Wardrobe: ").concat(
-      scene.wardrobe?.length && scene.vfx?.length ? ", " : "",
-      joinValues(scene.vfx ?? [], "VFX: ")
-    ),
-  }));
-}
-
-function BreakdownTable({ data }: { data: SceneBreakdown[] }) {
-  const hasRows = data.length > 0;
-
-  async function handleExport() {
-    const exportRows = buildExportRows(data);
-    const csv = await json2csv(exportRows);
-    const blob = new Blob(["\uFEFF", csv], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-
-    link.href = url;
-    link.download = "scene-breakdown.csv";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">
-            Scene Breakdown
-          </h2>
-          <p className="text-sm text-gray-600">
-            Export the AI-generated breakdown to your production spreadsheet.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={handleExport}
-          disabled={!hasRows}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
-        >
-          Export to Excel
-        </button>
-      </div>
-
-      <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-sm">
-        <table className="min-w-full divide-y divide-gray-200 bg-white text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left font-bold text-gray-900">
-                Scene
-              </th>
-              <th className="px-4 py-3 text-left font-bold text-gray-900">
-                Characters
-              </th>
-              <th className="px-4 py-3 text-left font-bold text-gray-900">
-                Props
-              </th>
-              <th className="px-4 py-3 text-left font-bold text-gray-900">
-                Wardrobe/VFX
-              </th>
-            </tr>
-          </thead>
-
-          <tbody className="divide-y divide-gray-200">
-            {data.map((scene, index) => (
-              <tr key={index} className="transition-colors hover:bg-gray-50">
-                <td className="w-1/4 break-words px-4 py-4 font-medium text-blue-600">
-                  {scene.sceneTitle}
-                </td>
-                <td className="px-4 py-4">
-                  <div className="flex flex-wrap gap-1">
-                    {scene.cast?.map((item) => (
-                      <span
-                        key={item}
-                        className="rounded-md bg-orange-100 px-2 py-1 text-xs font-bold uppercase text-orange-700"
-                      >
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-4">
-                  <div className="flex flex-wrap gap-1">
-                    {scene.props?.map((item) => (
-                      <span
-                        key={item}
-                        className="rounded-md bg-blue-100 px-2 py-1 text-xs text-blue-700"
-                      >
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-4">
-                  <div className="flex flex-wrap gap-1">
-                    {scene.wardrobe?.map((item) => (
-                      <span
-                        key={item}
-                        className="rounded-md border border-purple-200 px-2 py-1 text-xs text-purple-600"
-                      >
-                        👗 {item}
-                      </span>
-                    ))}
-                    {scene.vfx?.map((item) => (
-                      <span
-                        key={item}
-                        className="rounded-md bg-green-100 px-2 py-1 text-xs text-green-700"
-                      >
-                        🪄 {item}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  return {
+    status,
+    completedScenes,
+    totalScenes,
+    percent,
+    message,
+    currentSceneTitle,
+  };
 }
 
 export default function Home() {
+  const activeRunIdRef = useRef(0);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [rows, setRows] = useState<SceneBreakdown[]>([]);
+  const [progress, setProgress] = useState<BreakdownProgress>(IDLE_PROGRESS);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const isBusy =
+    progress.status === "parsing" || progress.status === "analyzing";
+  const hasResults = rows.length > 0;
+
+  const summaryLabel = useMemo(() => {
+    if (progress.totalScenes > 0) {
+      return `${progress.totalScenes} scene${
+        progress.totalScenes === 1 ? "" : "s"
+      } ready for analysis`;
+    }
+
+    if (selectedFile) {
+      return `Selected file: ${selectedFile.name}`;
+    }
+
+    return "No screenplay loaded yet";
+  }, [progress.totalScenes, selectedFile]);
+
+  function handleFileSelected(file: File) {
+    if (isBusy) {
+      return;
+    }
+
+    activeRunIdRef.current += 1;
+    setSelectedFile(file);
+    setRows([]);
+    setErrorMessage(null);
+    setProgress({
+      ...IDLE_PROGRESS,
+      message: `Ready to analyze ${file.name}.`,
+    });
+  }
+
+  async function handleAnalyzeScript() {
+    if (!selectedFile) {
+      return;
+    }
+
+    const runId = activeRunIdRef.current + 1;
+    activeRunIdRef.current = runId;
+    setRows([]);
+    setErrorMessage(null);
+    setProgress({
+      ...IDLE_PROGRESS,
+      status: "parsing",
+      message: "Parsing screenplay into scenes...",
+    });
+
+    try {
+      const scriptText = await selectedFile.text();
+      const scenes = parseScript(scriptText);
+
+      if (scenes.length === 0) {
+        throw new Error("No scenes were detected in the uploaded script.");
+      }
+
+      setProgress(
+        createProgressState(
+          0,
+          scenes.length,
+          scenes[0]?.title,
+          "analyzing",
+          "Analyzing scenes with Claude..."
+        )
+      );
+
+      const nextRows: SceneBreakdown[] = [];
+
+      // Analyze scenes sequentially so the progress bar tracks a predictable,
+      // production-style queue instead of racing multiple requests at once.
+      for (const [index, scene] of scenes.entries()) {
+        const breakdown = await analyzeSceneAction(scene);
+
+        if (activeRunIdRef.current !== runId) {
+          return;
+        }
+
+        const completedScenes = index + 1;
+
+        nextRows.push(breakdown);
+        setRows([...nextRows]);
+        setProgress(
+          createProgressState(
+            completedScenes,
+            scenes.length,
+            scenes[index + 1]?.title,
+            completedScenes === scenes.length ? "complete" : "analyzing",
+            completedScenes === scenes.length
+              ? "Smart breakdown complete."
+              : "Analyzing scenes with Claude..."
+          )
+        );
+      }
+    } catch (error) {
+      if (activeRunIdRef.current !== runId) {
+        return;
+      }
+
+      setProgress({
+        ...IDLE_PROGRESS,
+        status: "error",
+        message: "SceneSync could not finish the smart breakdown.",
+      });
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "An unexpected error interrupted analysis."
+      );
+    }
+  }
+
+  async function handleExport() {
+    if (!hasResults) {
+      return;
+    }
+
+    setIsExporting(true);
+
+    try {
+      await downloadBreakdownCsv(rows);
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-zinc-50 px-6 py-12 font-sans">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-8">
-        <section className="space-y-4">
-          <span className="inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700">
-            SceneSync
-          </span>
-          <div className="space-y-3">
-            <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-gray-950">
-              Turn AI scene analysis into a producer-friendly breakdown.
-            </h1>
-            <p className="max-w-3xl text-lg leading-8 text-gray-600">
-              Review cast, props, wardrobe, and VFX requirements in one table,
-              then export the results to a spreadsheet-friendly CSV.
-            </p>
+    <div className="min-h-screen px-6 py-12 font-sans">
+      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8">
+        <section className="rounded-[32px] border border-slate-200 bg-white/85 px-8 py-10 shadow-sm">
+          <div className="space-y-6">
+            <div className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white">
+              <Clapperboard className="h-4 w-4" />
+              SceneSync
+            </div>
+
+            <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="space-y-4">
+                <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
+                  AI-powered smart breakdowns for the invisible labor of
+                  pre-production.
+                </h1>
+                <p className="max-w-3xl text-lg leading-8 text-slate-600">
+                  Upload a script, let SceneSync split it into scenes, extract
+                  production elements with Claude, and export the results to the
+                  spreadsheets your team already uses.
+                </p>
+              </div>
+
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6">
+                <div className="flex items-center gap-3">
+                  <Sparkles className="h-5 w-5 text-slate-900" />
+                  <h2 className="text-lg font-semibold text-slate-950">
+                    Studio-ready workflow
+                  </h2>
+                </div>
+                <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
+                  <li>Parse `.txt` and `.fountain` scripts into scene objects</li>
+                  <li>Track progress as each scene is analyzed individually</li>
+                  <li>Review color-coded cast, props, wardrobe, and VFX tags</li>
+                  <li>Download CSV output for scheduling and budgeting teams</li>
+                </ul>
+              </div>
+            </div>
           </div>
         </section>
 
-        <BreakdownTable data={sampleScenes} />
+        <section className="grid gap-8 xl:grid-cols-[0.95fr_1.05fr]">
+          <div className="space-y-6">
+            <FileUploadZone
+              isBusy={isBusy}
+              selectedFileName={selectedFile?.name}
+              onFileSelected={handleFileSelected}
+            />
+
+            <div className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium uppercase tracking-[0.16em] text-slate-500">
+                    Script status
+                  </p>
+                  <h2 className="mt-2 text-xl font-semibold text-slate-950">
+                    {summaryLabel}
+                  </h2>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAnalyzeScript}
+                  disabled={!selectedFile || isBusy}
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {isBusy ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  {isBusy ? "Analyzing..." : "Run Smart Breakdown"}
+                </button>
+              </div>
+
+              {errorMessage ? (
+                <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {errorMessage}
+                </div>
+              ) : null}
+            </div>
+
+            {progress.status !== "idle" ? <ProgressBar progress={progress} /> : null}
+          </div>
+
+          <div className="space-y-6">
+            {hasResults ? (
+              <BreakdownTable
+                rows={rows}
+                isExporting={isExporting}
+                onExport={handleExport}
+              />
+            ) : (
+              <section className="rounded-3xl border border-dashed border-slate-300 bg-white/70 p-10 text-center shadow-sm">
+                <div className="mx-auto flex max-w-lg flex-col items-center gap-4">
+                  <div className="rounded-full bg-slate-100 p-4 text-slate-900">
+                    <FileText className="h-6 w-6" />
+                  </div>
+                  <h2 className="text-2xl font-semibold text-slate-950">
+                    Your breakdown will appear here
+                  </h2>
+                  <p className="text-sm leading-7 text-slate-600">
+                    Upload a screenplay and run the smart breakdown to generate
+                    cast, props, wardrobe, and VFX tags scene by scene.
+                  </p>
+                </div>
+              </section>
+            )}
+          </div>
+        </section>
       </main>
     </div>
   );

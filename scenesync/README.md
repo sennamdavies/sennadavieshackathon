@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SceneSync
 
-## Getting Started
+SceneSync is a Next.js App Router application that automates the invisible labor of script breakdowns. It helps production teams turn screenplay scenes into structured pre-production data for cast, props, wardrobe, and VFX planning.
 
-First, run the development server:
+## Why SceneSync
+
+Film teams still spend hours reading scripts scene by scene to build the first version of a breakdown. That work is essential, but repetitive and easy to bottleneck. SceneSync gives producers and coordinators a faster starting point by:
+
+- parsing uploaded `.txt` and `.fountain` scripts into scenes
+- sending each scene to Claude for structured extraction
+- displaying the results in a production-friendly breakdown table
+- exporting the final output to CSV for spreadsheet workflows
+
+## Product Workflow
+
+1. Upload a script file
+2. Split the script into scenes
+3. Analyze each scene with Claude
+4. Track progress as the breakdown runs
+5. Review the color-coded production elements
+6. Download the full breakdown as CSV
+
+## Tech Stack
+
+- Next.js App Router
+- React 19
+- TypeScript
+- Tailwind CSS v4
+- `fountain-js`
+- `json-2-csv`
+- `lucide-react`
+- Anthropic Claude API
+
+## Environment Setup
+
+Copy the example environment file:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.local.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Add your Anthropic API key:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+ANTHROPIC_API_KEY=your_key_here
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Local Development
 
-## Learn More
+Install dependencies and run the app:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm install
+npm run dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Then open [http://localhost:3000](http://localhost:3000).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Verification
 
-## Deploy on Vercel
+Run these checks once Node and npm are available locally:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm install
+npm run lint
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Manual verification checklist:
+
+- upload a `.txt` screenplay
+- upload a `.fountain` screenplay
+- confirm the progress bar advances scene by scene
+- confirm the breakdown table renders cast, props, wardrobe, and VFX tags
+- confirm CSV export downloads spreadsheet-friendly output
+
+## Git Safety
+
+- `.env.local` remains ignored by Git
+- `.env.local.example` is committed for reproducible setup
+- if `fountain-js` cannot provide scene boundaries, the parser falls back to regex-based heading detection
